@@ -1,14 +1,14 @@
 type GameOverProps = {
-  handleStart: VoidFunction;
+  handleReset: VoidFunction;
 }
 
-export default function GameOver({ handleStart }: GameOverProps) {
+export default function GameOver({ handleReset }: GameOverProps) {
   return (
     <div className="game-over-message">
       Game Over
       <br />
-      <button onClick={handleStart} className="restart-btn">
-        Restart
+      <button onClick={handleReset} className="restart-btn">
+        Reset
       </button>
     </div>
   );

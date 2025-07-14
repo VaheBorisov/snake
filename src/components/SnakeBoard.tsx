@@ -1,53 +1,65 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 
 import GameOver from '@/components/GameOver';
 
 import { BOARD_SIZE, INITIAL_DIRECTION, INITIAL_SNAKE } from '@/utils/constants';
-import { getRandomPosition } from '@/utils/helpers';
+import { checkCollision, checkFoodCollision, getRandomPosition, moveSnake } from '@/utils/helpers';
+
+import type { GameState } from '@/types';
 
 
 export default function SnakeBoard() {
-  const [snake, setSnake] = useState(INITIAL_SNAKE);
-  const [direction, setDirection] = useState(INITIAL_DIRECTION);
-  const [food, setFood] = useState(() => getRandomPosition(INITIAL_SNAKE));
-  const [gameOver, setGameOver] = useState(false);
-  const [score, setScore] = useState(0);
-  const [started, setStarted] = useState(false);
+  const [gameState, setGameState] = useState<GameState>({
+    snake: INITIAL_SNAKE,
+    food: getRandomPosition(INITIAL_SNAKE),
+    direction: INITIAL_DIRECTION,
+    score: 0,
+    gameOver: false,
+    started: false,
+  });
+
   const [highScore, setHighScore] = useState(() => {
     const stored = localStorage.getItem('snake-highscore');
     return stored ? parseInt(stored, 10) : 0;
   });
-  const moveRef = useRef(direction);
-  const snakeRef = useRef(snake);
+  const moveRef = useRef(gameState.direction);
+  const snakeRef = useRef(gameState.snake);
   const directionQueue = useRef<{ x: number; y: number }[]>([]);
 
   useEffect(() => {
-    snakeRef.current = snake;
-  }, [snake]);
+    snakeRef.current = gameState.snake;
+  }, [gameState.snake]);
 
   // Update high score
   useEffect(() => {
-    if (score > highScore) {
-      setHighScore(score);
-      localStorage.setItem('snake-highscore', String(score));
+    if (gameState.score > highScore) {
+      setHighScore(gameState.score);
+      localStorage.setItem('snake-highscore', String(gameState.score));
     }
-  }, [score, highScore]);
+  }, [gameState.score, highScore]);
 
-  // Start or restart game
+  // Reset game
+  const handleReset = useCallback(() => {
+    setGameState({
+      snake: INITIAL_SNAKE,
+      food: getRandomPosition(INITIAL_SNAKE),
+      direction: INITIAL_DIRECTION,
+      score: 0,
+      gameOver: false,
+      started: false,
+    });
+  }, []);
+
+  // Start game
   const handleStart = () => {
-    setSnake(INITIAL_SNAKE);
-    setDirection(INITIAL_DIRECTION);
-    setFood(getRandomPosition(INITIAL_SNAKE));
-    setGameOver(false);
-    setScore(0);
-    setStarted(true);
+    setGameState(prevState => ({ ...prevState, started: true }));
     directionQueue.current = [];
   };
 
   // Handle keyboard input with direction queue
   useEffect(() => {
-    if (!started || gameOver) return;
+    if (!gameState.started || gameState.gameOver) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       let newDir: { x: number; y: number } | null = null;
       switch (e.key) {
@@ -74,63 +86,59 @@ export default function SnakeBoard() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [started, gameOver]);
+  }, [gameState.started, gameState.gameOver]);
 
   // Move the snake
   useEffect(() => {
-    if (!started || gameOver) return;
-    moveRef.current = direction;
+    if (!gameState.started || gameState.gameOver) return;
+    moveRef.current = gameState.direction;
     const interval = setInterval(() => {
-      // Use next direction in queue if available
-      let nextDir = direction;
+      let nextDir = gameState.direction;
       if (directionQueue.current.length > 0) {
         nextDir = directionQueue.current.shift()!;
-        setDirection(nextDir);
+        setGameState(prev => ({ ...prev, direction: nextDir }));
       }
-      setSnake(prev => {
-        const newHead = {
-          x: prev[0].x + nextDir.x,
-          y: prev[0].y + nextDir.y,
-        };
-        // Wall collision
-        if (
-          newHead.x < 0 ||
-          newHead.x >= BOARD_SIZE ||
-          newHead.y < 0 ||
-          newHead.y >= BOARD_SIZE
-        ) {
-          setGameOver(true);
-          setStarted(false);
-          return prev;
+
+      setGameState(prev => {
+        const newSnake = moveSnake(prev.snake, nextDir);
+        if (checkCollision(newSnake)) {
+          return {
+            ...prev,
+            direction: nextDir,
+            gameOver: true,
+          };
         }
-        // Self collision
-        if (prev.some(seg => seg.x === newHead.x && seg.y === newHead.y)) {
-          setGameOver(true);
-          setStarted(false);
-          return prev;
-        }
-        let newSnake;
-        // Check if food is eaten
-        if (newHead.x === food.x && newHead.y === food.y) {
-          newSnake = [newHead, ...prev];
-          setFood(getRandomPosition(newSnake));
-          setScore(s => s + 1);
+        if (checkFoodCollision(newSnake, prev.food)) {
+          const newFood = getRandomPosition(newSnake);
+          const newScore = prev.score + 1;
+
+          return {
+            ...prev,
+            snake: newSnake,
+            food: newFood,
+            score: newScore,
+            direction: nextDir,
+          };
         } else {
-          newSnake = [newHead, ...prev.slice(0, -1)];
+          newSnake.pop();
+          return {
+            ...prev,
+            direction: nextDir,
+            snake: newSnake,
+          };
         }
-        return newSnake;
       });
     }, 120);
     return () => clearInterval(interval);
-  }, [direction, food, gameOver, started]);
+  }, [gameState.direction, gameState.food, gameState.gameOver, gameState.started]);
 
   // Render board
   const cells = Array.from({ length: BOARD_SIZE * BOARD_SIZE }).map((_, idx) => {
     const x = idx % BOARD_SIZE;
     const y = Math.floor(idx / BOARD_SIZE);
-    const isSnake = snake.some(seg => seg.x === x && seg.y === y);
-    const isHead = snake[0].x === x && snake[0].y === y;
-    const isFood = food.x === x && food.y === y;
+    const isSnake = gameState.snake.some(seg => seg.x === x && seg.y === y);
+    const isHead = gameState.snake[0].x === x && gameState.snake[0].y === y;
+    const isFood = gameState.food.x === x && gameState.food.y === y;
     return (
       <div
         key={idx}
@@ -149,13 +157,13 @@ export default function SnakeBoard() {
   return (
     <>
       <div className="flex flex-col items-center mb-3">
-        <div className="text-lg font-bold text-gray-100 tracking-wide">Score: {score}</div>
+        <div className="text-lg font-bold text-gray-100 tracking-wide">Score: {gameState.score}</div>
         <div className="text-md text-gray-400">High Score: {highScore}</div>
       </div>
       <div
         className={clsx(
           'snake-board mx-auto',
-          { 'opacity-50': gameOver || !started },
+          { 'opacity-50': gameState.gameOver || !gameState.started },
         )}
         style={{
           display: 'grid',
@@ -167,13 +175,13 @@ export default function SnakeBoard() {
       >
         {cells}
       </div>
-      {!started && !gameOver && (
+      {!gameState.started && !gameState.gameOver && (
         <div className="flex justify-center mt-6">
           <button onClick={handleStart} className="restart-btn">Start Game</button>
         </div>
       )}
-      {gameOver && (
-        <GameOver handleStart={handleStart} />
+      {gameState.gameOver && (
+        <GameOver handleReset={handleReset} />
       )}
     </>
   );
